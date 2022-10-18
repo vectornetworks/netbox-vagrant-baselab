@@ -10,7 +10,7 @@ The only real requirements are [Vagrant](https://www.vagrantup.com/) with [Virtu
 ## Installation (or not) and Use
 There's no real installation required here, all that need be done is clone the repo and "vagrant up"
 
-    git clone 
+    git clone https://github.com/vectornetworks/netbox-vagrant-baselab.git 
     cd netbox-vagrant-baselab
     vagrant up
 
