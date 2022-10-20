@@ -27,9 +27,7 @@ Vagrant.configure("2") do |config|
       git clone -b master --depth 1 https://github.com/netbox-community/netbox.git .
       adduser --system --group netbox
       chown --recursive netbox /opt/netbox/netbox/media/
-      source /opt/netbox/venv/bin/activate
-      python3 -m pip install netbox-bgp
-      deactivate
+      echo "netbox-bgp" > /opt/netbox/local_requirements.txt
       cp /vagrant/netbox_cfg.py /opt/netbox/netbox/netbox/configuration.py
       /opt/netbox/upgrade.sh
       source /opt/netbox/venv/bin/activate
@@ -46,7 +44,6 @@ Vagrant.configure("2") do |config|
       rm /etc/nginx/sites-enabled/default
       ln -s /etc/nginx/sites-available/netbox /etc/nginx/sites-enabled/netbox
       systemctl restart nginx
-      source /opt/netbox/venv/bin/activate
       python3 -m pip install pynetbox
     SHELL
 
