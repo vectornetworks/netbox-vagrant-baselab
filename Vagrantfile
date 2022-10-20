@@ -32,6 +32,10 @@ Vagrant.configure("2") do |config|
       source /opt/netbox/venv/bin/activate
       cd /opt/netbox/netbox
       python3 manage.py createsuperuser --noinput
+      python3 -m pip install netbox-bgp
+      cd /opt/netbox/netbox/
+      python3 manage.py migrate
+      python3 collectstatic
       deactivate
       cp /opt/netbox/contrib/gunicorn.py /opt/netbox/gunicorn.py
       cp -v /opt/netbox/contrib/*.service /etc/systemd/system/
