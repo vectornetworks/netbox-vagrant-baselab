@@ -27,6 +27,7 @@ Vagrant.configure("2") do |config|
       git clone -b master --depth 1 https://github.com/netbox-community/netbox.git .
       adduser --system --group netbox
       chown --recursive netbox /opt/netbox/netbox/media/
+      echo "netbox-bgp" > /opt/netbox/local_requirements.txt
       cp /vagrant/netbox_cfg.py /opt/netbox/netbox/netbox/configuration.py
       /opt/netbox/upgrade.sh
       source /opt/netbox/venv/bin/activate
