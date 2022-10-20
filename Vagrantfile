@@ -32,10 +32,6 @@ Vagrant.configure("2") do |config|
       source /opt/netbox/venv/bin/activate
       cd /opt/netbox/netbox
       python3 manage.py createsuperuser --noinput
-      python3 -m pip install netbox-bgp
-      cd /opt/netbox/netbox/
-      python3 manage.py migrate
-      python3 collectstatic
       deactivate
       cp /opt/netbox/contrib/gunicorn.py /opt/netbox/gunicorn.py
       cp -v /opt/netbox/contrib/*.service /etc/systemd/system/
@@ -47,6 +43,12 @@ Vagrant.configure("2") do |config|
       rm /etc/nginx/sites-enabled/default
       ln -s /etc/nginx/sites-available/netbox /etc/nginx/sites-enabled/netbox
       systemctl restart nginx
+      source /opt/netbox/venv/bin/activate
+      python3 -m pip install netbox-bgp
+      cd /opt/netbox/netbox/
+      python3 manage.py migrate
+      python3 collectstatic
+      systemctl restart netbox
       python3 -m pip install pynetbox
     SHELL
 
