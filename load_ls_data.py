@@ -300,16 +300,25 @@ def create_transit_net_ips_bgp_sessions(nb, ls_devices, spine_asn, leaf_asn_mapp
                 leaf_ip = nb.ipam.ip_addresses.get(device=leafname, interface=leafintfname)
 
             try:
-                print(f"Creating BGP session between {spinename} {spineintfname} "
+                print(f"Creating BGP sessions between {spinename} {spineintfname} "
                       f"and {leafname} {leafintfname}...", end='')
 
-                nb.plugins.bgp.session.create(name=f'{spinename}-{leafname}',
+                nb.plugins.bgp.session.create(name=f'{spinename}-->{leafname}',
                                               site=spinedev.site.id,
                                               device=spinedev.id,
                                               local_as=spine_asn.id,
                                               remote_as=leaf_asn_mapping[leafname].id,
                                               local_address=spine_ip.id,
                                               remote_address=leaf_ip.id
+                                              )
+
+                nb.plugins.bgp.session.create(name=f'{leafname}-->{spinename}',
+                                              site=leafdev.site.id,
+                                              device=leafdev.id,
+                                              local_as=leaf_asn_mapping[leafname].id,
+                                              remote_as=spine_asn.id,
+                                              local_address=leaf_ip.id,
+                                              remote_address=spine_ip.id
                                               )
                 print("done")
 
