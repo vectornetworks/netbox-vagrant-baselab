@@ -55,6 +55,21 @@ TRANSIT_PREFIX = {
     'site': {'name': 'vagrantlab'}
 }
 
+RIR = {
+    'name': 'VagrantLabRIR',
+    'slug': 'vagrantlabrir',
+    'is_private': True
+}
+
+ASNS = {
+    'spine': {
+        'asn': 65100
+    },
+    'leaf': {
+        'range_start': 64601
+    }
+}
+
 def create_sites(nb):
     for site in SITES:
         try:
@@ -130,27 +145,39 @@ def create_intf_templates(nb):
         print("done")
 
 def create_devices(nb):
-    for device in DEVICES.values():
+    created_devices = dict()
+    for role, device in DEVICES.items():
+        created_devices[role] = list()
         for i in range(1, device['qty'] + 1):
             devicename = f"{device['prefix']}{i:02d}"
             try:
                 print(f"Creating device '{devicename}'...", end='')
-                nb.dcim.devices.create(name=devicename, device_role=device['device_role'],
-                                       device_type=device['device_type'], site=device['site'])
+                created_devices[role].append(nb.dcim.devices.create(
+                                                name=devicename,
+                                                device_role=device['device_role'],
+                                                device_type=device['device_type'],
+                                                site=device['site'])
+                                             )
                 print("done")
 
             except pynetbox.core.query.RequestError as E:
                 if E.error.find("name already exists") != -1:
                     print("device already exists, skipping")
+                    existing_device = nb.dcim.devices.get(name=devicename)
+                    created_devices[role].append(existing_device)
                     continue
                 else:
                     raise
 
-def create_connections(nb):
-    for i in range(1, DEVICES['spines']['qty'] + 1):
-        spinename = f"{DEVICES['spines']['prefix']}{i:02d}"
-        for j in range(1, DEVICES['leafs']['qty'] + 1):
-            leafname = f"{DEVICES['leafs']['prefix']}{j:02d}"
+    return created_devices
+
+def create_connections(nb, ls_devices):
+    i = 1
+    for spinedev in ls_devices['spines']:
+        j = 1
+        spinename = spinedev.name
+        for leafdev in ls_devices['leafs']:
+            leafname = leafdev.name
             spineintf = f"Ethernet{j}"
             leafintf = f"Ethernet{i}"
             try:
@@ -175,9 +202,14 @@ def create_connections(nb):
                 )
                 print("done")
 
-            except pynetbox.core.query.RequestError as E:
+            except pynetbox.core.query.RequestError:
                 print("connection already exists, skipping")
+                j += 1
                 continue
+
+            j += 1
+        i += 1
+
 
 def create_transit_prefix(nb):
     print(f"Creating transit prefix {TRANSIT_PREFIX['prefix']}...", end='')
@@ -188,11 +220,62 @@ def create_transit_prefix(nb):
                                 site=TRANSIT_PREFIX['site'], status='container')
         print("done")
 
-def create_transit_net_and_ips(nb):
-    for i in range(1, DEVICES['spines']['qty'] + 1):
-        spinename = f"{DEVICES['spines']['prefix']}{i:02d}"
-        for j in range(1, DEVICES['leafs']['qty'] + 1):
-            leafname = f"{DEVICES['leafs']['prefix']}{j:02d}"
+def create_rir_asn(nb, ls_devices):
+    try:
+        print(f"Creating RIR {RIR['name']}...", end='')
+        rir = nb.ipam.rirs.create(**RIR)
+        print("done")
+
+    except pynetbox.core.query.RequestError as E:
+        if E.error.find("name already exists") != -1:
+            print("RIR already exists, skipping")
+            rir = nb.ipam.rirs.get(name=RIR['name'])
+        else:
+            raise
+
+    try:
+        print(f"Creating Spine ASN {ASNS['spine']['asn']}...", end='')
+        spine_asn = nb.ipam.asns.create(asn=ASNS['spine']['asn'],
+                                        rir=rir.id, description='Spine ASN')
+        print("done")
+
+    except pynetbox.core.query.RequestError as E:
+        if E.error.find("ASN already exists") != -1:
+            print("ASN already exists, skipping")
+            spine_asn = nb.ipam.asns.get(asn=ASNS['spine']['asn'])
+        else:
+            raise
+
+    leaf_asn = ASNS['leaf']['range_start']
+    leaf_asn_mapping = dict()
+    for leaf in ls_devices['leafs']:
+        try:
+            print(f"Creating Leaf {leaf.name} ASN {leaf_asn}...", end='')
+            created_leaf_asn = nb.ipam.asns.create(asn=leaf_asn,
+                                                   rir=rir.id, description=f'Leaf {leaf.name} ASN')
+            leaf_asn_mapping[leaf.name] = created_leaf_asn
+            print("done")
+
+        except pynetbox.core.query.RequestError as E:
+            if E.error.find("ASN already exists") != -1:
+                print("ASN already exists, skipping")
+                leaf_asn_mapping[leaf.name] = nb.ipam.asns.get(asn=leaf_asn)
+                leaf_asn += 1
+                continue
+            else:
+                raise
+
+        leaf_asn += 1
+
+    return spine_asn, leaf_asn_mapping
+
+def create_transit_net_ips_bgp_sessions(nb, ls_devices, spine_asn, leaf_asn_mapping):
+    i = 1
+    for spinedev in ls_devices['spines']:
+        j = 1
+        spinename = spinedev.name
+        for leafdev in ls_devices['leafs']:
+            leafname = leafdev.name
             spineintfname = f"Ethernet{j}"
             leafintfname = f"Ethernet{i}"
 
@@ -204,15 +287,42 @@ def create_transit_net_and_ips(nb):
             if spineintf.count_ipaddresses == 0 and leafintf.count_ipaddresses == 0:
                 tpfx = nb.ipam.prefixes.get(prefix=TRANSIT_PREFIX['prefix'])
                 tnet = tpfx.available_prefixes.create({'prefix_length': 31})
-                tnet.available_ips.create(
+                spine_ip = tnet.available_ips.create(
                     {'assigned_object_id': spineintf.id,
                     'assigned_object_type':'dcim.interface'})
-                tnet.available_ips.create(
+                leaf_ip = tnet.available_ips.create(
                     {'assigned_object_id': leafintf.id,
                     'assigned_object_type':'dcim.interface'})
                 print("done")
             else:
                 print("IPs already exist, skipping")
+                spine_ip = nb.ipam.ip_addresses.get(device=spinename, interface=spineintfname)
+                leaf_ip = nb.ipam.ip_addresses.get(device=leafname, interface=leafintfname)
+
+            try:
+                print(f"Creating BGP session between {spinename} {spineintfname} "
+                      f"and {leafname} {leafintfname}...", end='')
+
+                nb.plugins.bgp.session.create(name=f'{spinename}-{leafname}',
+                                              site=spinedev.site.id,
+                                              device=spinedev.id,
+                                              local_as=spine_asn.id,
+                                              remote_as=leaf_asn_mapping[leafname].id,
+                                              local_address=spine_ip.id,
+                                              remote_address=leaf_ip.id
+                                              )
+                print("done")
+
+            except pynetbox.core.query.RequestError as E:
+                if E.error.find("already exists") != -1:
+                    print("BGP session already exists, skipping")
+                    j += 1
+                    continue
+                else:
+                    raise
+
+            j += 1
+        i += 1
 
 def main():
     nb = pynetbox.api(NB_URL, NB_API_TOKEN)
@@ -222,10 +332,11 @@ def main():
     create_manufacturers(nb)
     create_devicetypes(nb)
     create_intf_templates(nb)
-    create_devices(nb)
-    create_connections(nb)
+    ls_devices = create_devices(nb)
+    create_connections(nb, ls_devices)
     create_transit_prefix(nb)
-    create_transit_net_and_ips(nb)
+    spine_asn, leaf_asn_mapping =  create_rir_asn(nb, ls_devices)
+    create_transit_net_ips_bgp_sessions(nb, ls_devices, spine_asn, leaf_asn_mapping)
 
 if __name__ == '__main__':
     main()
