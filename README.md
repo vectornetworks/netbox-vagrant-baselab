@@ -17,7 +17,7 @@ There's no real installation required here, all that need be done is clone the r
 After the VM boots and runs through its provisioning scripts, you should have a fully installed and operable Netbox instance.  The Vagrantfile includes an automatic port forwarding on the host machine port 8081, so if you navigate to http://localhost:8081 on the host machine that should take you to the Netbox login.  The default credentials are **admin/netbox123**
 
 ## Loading Sample Data
-This repo also includes a script, *load_ls_data.py*, that can be used to quickly load some sample data into Netbox.  Without modification, the script will load up a 2 Spine, 4 Leaf Arista CEOS clos topology with all the required connections and IP addressing.  Start by ssh'ing to the Vagrant guest (from the repo folder):
+This repo also includes a script, *load_ls_data.py*, that can be used to quickly load some sample data into Netbox.  Without modification, the script will load up a 2 Spine, 4 Leaf Arista CEOS clos topology with all the required connections, IP addressing, and BGP sessions.  Start by ssh'ing to the Vagrant guest (from the repo folder):
 
     vagrant ssh
 
