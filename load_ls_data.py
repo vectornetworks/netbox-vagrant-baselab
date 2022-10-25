@@ -55,6 +55,11 @@ TRANSIT_PREFIX = {
     'site': {'name': 'vagrantlab'}
 }
 
+LOOPBACK_PREFIX = {
+    'prefix': '192.168.255.0/24',
+    'site': {'name': 'vagrantlab'}
+}
+
 RIR = {
     'name': 'VagrantLabRIR',
     'slug': 'vagrantlabrir',
@@ -69,6 +74,15 @@ ASNS = {
         'range_start': 64601
     }
 }
+
+TAGS = [
+    {
+        'name': 'l3base',
+        'slug': 'l3base',
+        'description': "Signify that an interface is an L3 base interface (i.e., 'no switchport')"
+    }
+]
+
 
 def create_sites(nb):
     for site in SITES:
@@ -144,6 +158,19 @@ def create_intf_templates(nb):
                     raise
         print("done")
 
+def create_tags(nb):
+    for tag in TAGS:
+        print(f"Adding tag {tag['name']}...", end='')
+        try:
+            nb.extras.tags.create(**tag)
+            print("done")
+        except pynetbox.core.query.RequestError as E:
+            if E.error.find("already exists") != -1:
+                print(f"tag {tag['name']} already exists, skipping")
+                continue
+            else:
+                raise
+
 def create_devices(nb):
     created_devices = dict()
     for role, device in DEVICES.items():
@@ -213,12 +240,30 @@ def create_connections(nb, ls_devices):
 
 def create_transit_prefix(nb):
     print(f"Creating transit prefix {TRANSIT_PREFIX['prefix']}...", end='')
-    if nb.ipam.prefixes.get(prefix=TRANSIT_PREFIX['prefix']):
+    transit_prefix = nb.ipam.prefixes.get(prefix=TRANSIT_PREFIX['prefix'])
+    if transit_prefix:
         print("prefix already exists, skipping")
     else:
-        nb.ipam.prefixes.create(prefix=TRANSIT_PREFIX['prefix'],
-                                site=TRANSIT_PREFIX['site'], status='container')
+        transit_prefix = nb.ipam.prefixes.create(prefix=TRANSIT_PREFIX['prefix'],
+                                                 site=TRANSIT_PREFIX['site'], status='container')
         print("done")
+
+    return transit_prefix
+
+def create_loopback_prefix(nb):
+    print(f"Creating loopback prefix {LOOPBACK_PREFIX['prefix']}...", end='')
+    loopback_prefix = nb.ipam.prefixes.get(prefix=LOOPBACK_PREFIX['prefix'])
+    if loopback_prefix:
+        print("prefix already exists, skipping")
+    else:
+        loopback_prefix = nb.ipam.prefixes.create(prefix=LOOPBACK_PREFIX['prefix'],
+                                                  site=LOOPBACK_PREFIX['site'], status='container')
+        loopback_s32 = loopback_prefix.available_prefixes.create({'prefix_length': 32})
+        loopback_s32.available_ips.create({'description': 'RESERVED'})
+
+        print("done")
+
+    return loopback_prefix
 
 def create_rir_asn(nb, ls_devices):
     try:
@@ -269,7 +314,8 @@ def create_rir_asn(nb, ls_devices):
 
     return spine_asn, leaf_asn_mapping
 
-def create_transit_net_ips_bgp_sessions(nb, ls_devices, spine_asn, leaf_asn_mapping):
+def create_transit_net_ips_bgp_sessions(
+    nb, transit_prefix, ls_devices, spine_asn, leaf_asn_mapping):
     i = 1
     for spinedev in ls_devices['spines']:
         j = 1
@@ -285,7 +331,7 @@ def create_transit_net_ips_bgp_sessions(nb, ls_devices, spine_asn, leaf_asn_mapp
             print(f"Creating transit network and IPs between {spinename} {spineintfname} "
                   f"and {leafname} {leafintfname}...", end='')
             if spineintf.count_ipaddresses == 0 and leafintf.count_ipaddresses == 0:
-                tpfx = nb.ipam.prefixes.get(prefix=TRANSIT_PREFIX['prefix'])
+                tpfx = transit_prefix
                 tnet = tpfx.available_prefixes.create({'prefix_length': 31})
                 spine_ip = tnet.available_ips.create(
                     {'assigned_object_id': spineintf.id,
@@ -298,6 +344,18 @@ def create_transit_net_ips_bgp_sessions(nb, ls_devices, spine_asn, leaf_asn_mapp
                 print("IPs already exist, skipping")
                 spine_ip = nb.ipam.ip_addresses.get(device=spinename, interface=spineintfname)
                 leaf_ip = nb.ipam.ip_addresses.get(device=leafname, interface=leafintfname)
+
+            try:
+                print(f"Applying L3 base tags to {spineintfname} and {leafintfname}...", end='')
+                spineintf.update({'tags': [{'name':'l3base'}]})
+                leafintf.update({'tags': [{'name':'l3base'}]})
+                print("done")
+
+            except pynetbox.core.query.RequestError as E:
+                if E.error.find("Related object not found") != -1:
+                    print("Tag 'l3base' not found, skipping")
+                else:
+                    raise
 
             try:
                 print(f"Creating BGP sessions between {spinename} {spineintfname} "
@@ -333,6 +391,34 @@ def create_transit_net_ips_bgp_sessions(nb, ls_devices, spine_asn, leaf_asn_mapp
             j += 1
         i += 1
 
+def create_loopbacks_ips(nb, ls_devices, loopback_prefix):
+    for ls_device in ls_devices.values():
+        for device in ls_device:
+            try:
+                print(f"Creating Loopback0 on {device.name}...", end='')
+                loopback_intf = nb.dcim.interfaces.create(
+                    name='Loopback0',
+                    device=device.id,
+                    type='virtual')
+                print("done")
+
+            except pynetbox.core.query.RequestError as E:
+                if E.error.find("must make a unique set") != -1:
+                    print("interface already exists, skipping")
+                    loopback_intf = nb.dcim.interfaces.get(name='Loopback0', device=device.name)
+                else:
+                    raise
+
+            print(f"Creating Loopback0 IP address for {device.name}...", end='')
+            if loopback_intf.count_ipaddresses == 0:
+                loopback_s32 = loopback_prefix.available_prefixes.create({'prefix_length': 32})
+                loopback_s32.available_ips.create(
+                    {'assigned_object_id': loopback_intf.id,
+                    'assigned_object_type': 'dcim.interface'})
+                print("done")
+            else:
+                print(f"IP already exists, skipping")
+
 def main():
     nb = pynetbox.api(NB_URL, NB_API_TOKEN)
 
@@ -342,10 +428,13 @@ def main():
     create_devicetypes(nb)
     create_intf_templates(nb)
     ls_devices = create_devices(nb)
+    create_tags(nb)
     create_connections(nb, ls_devices)
-    create_transit_prefix(nb)
+    transit_prefix = create_transit_prefix(nb)
+    loopback_prefix = create_loopback_prefix(nb)
     spine_asn, leaf_asn_mapping =  create_rir_asn(nb, ls_devices)
-    create_transit_net_ips_bgp_sessions(nb, ls_devices, spine_asn, leaf_asn_mapping)
+    create_transit_net_ips_bgp_sessions(nb, transit_prefix, ls_devices, spine_asn, leaf_asn_mapping)
+    create_loopbacks_ips(nb, ls_devices, loopback_prefix)
 
 if __name__ == '__main__':
     main()
