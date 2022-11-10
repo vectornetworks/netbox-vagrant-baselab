@@ -19,8 +19,8 @@ After the VM boots and runs through its provisioning scripts, you should have a 
 ## Loading Sample Data
 This repo also includes a script, *load_ls_data.py*, that can be used to quickly load some sample data into Netbox.  The package includes two different data files that can be used to load one of two sample topologies:
 
-    * *ls_data_ceos.yaml* - this loads a 2 spine, 4 leaf CEOS clos topology which can be used with Arista CEOS containers.
-    * *ls_data_n9kv.yaml* - this loads a 1 spine, 2 leaf Cisco Nexus n9kv topology. This is geared towards BGP EVPN.
+* *ls_data_ceos.yaml* - this loads a 2 spine, 4 leaf CEOS clos topology which can be used with Arista CEOS containers.
+* *ls_data_n9kv.yaml* - this loads a 1 spine, 2 leaf Cisco Nexus n9kv topology. This is geared towards BGP EVPN.
 
 Start by ssh'ing to the Vagrant guest (from the repo folder):
 
