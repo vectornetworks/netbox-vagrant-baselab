@@ -17,18 +17,27 @@ There's no real installation required here, all that need be done is clone the r
 After the VM boots and runs through its provisioning scripts, you should have a fully installed and operable Netbox instance.  The Vagrantfile includes an automatic port forwarding on the host machine port 8081, so if you navigate to http://localhost:8081 on the host machine that should take you to the Netbox login.  The default credentials are **admin/netbox123**
 
 ## Loading Sample Data
-This repo also includes a script, *load_ls_data.py*, that can be used to quickly load some sample data into Netbox.  Without modification, the script will load up a 2 Spine, 4 Leaf Arista CEOS clos topology with all the required connections, IP addressing, and BGP sessions.  Start by ssh'ing to the Vagrant guest (from the repo folder):
+This repo also includes a script, *load_ls_data.py*, that can be used to quickly load some sample data into Netbox.  The package includes two different data files that can be used to load one of two sample topologies:
+
+    * *ls_data_ceos.yaml* - this loads a 2 spine, 4 leaf CEOS clos topology which can be used with Arista CEOS containers.
+    * *ls_data_n9kv.yaml* - this loads a 1 spine, 2 leaf Cisco Nexus n9kv topology. This is geared towards BGP EVPN.
+
+Start by ssh'ing to the Vagrant guest (from the repo folder):
 
     vagrant ssh
 
 Once ssh'd into the guest, the script can be run as follows:
 
-    python3 /vagrant/load_ls_data.py
+    python3 /vagrant/load_ls_data.py <YAMLDATA>
+
+For example:
+
+    python3 /vagrant/load_ls_data.py /vagrant/ls_data_ceos.yaml
 
 It will provide some output about the objects it is creating and status.  After the script run is complete, you can log into Netbox and begin testing (or just poking around - this should give you a feel for some of the basic Netbox data and objects).
 
 ### Customizing the Data
-Some of the data in the *load_ls_data.py* script can be customized by modifying the global variables at the top of the script.  If, for example, you wanted to change the device manufacturer or model, that could be accomplished by editing the MANUFACTURERS and DEVICE_TYPES variables, respectively.  Most of the globals should be fairly safe to modify using sane values, but just note that the script assumes a leaf/spine clos topology so modifying the DEVICES should take that into consideration.
+Some of the data loaded by the *load_ls_data.py* script can be customized by modifying (or creating new) YAML data definitions.  If, for example, you wanted to change the device manufacturer or model, that could be accomplished by editing the *manufacturers* and *device_types* sections, respectively.  Most of the values should be fairly safe to modify using sane values, but just note that the script assumes a leaf/spine clos topology so be aware of that when modifying values in things like *devices*.
 
 ## API Token
 An API token for the 'admin' user is automatically generated during the provisioning process.  It is located at ```/home/vagrant/nb_api_token``` and can be used for testing API calls.  The ```pynetbox``` library is also installed by default and can be leveraged for testing Python scripts.

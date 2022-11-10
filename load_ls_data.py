@@ -1,4 +1,7 @@
 import os
+import re
+import argparse
+import yaml
 import pynetbox
 
 NB_URL = 'http://localhost'
@@ -9,83 +12,8 @@ if not NB_API_TOKEN and os.path.isfile(api_token_file):
     with open(api_token_file) as f:
         NB_API_TOKEN = f.read().strip()
 
-SITES = [
-    {'name': 'vagrantlab', 'slug': 'vagrantlab'}
-]
-
-ROLES = [
-    {'name': 'leaf', 'slug': 'leaf'},
-    {'name': 'spine', 'slug': 'spine'}
-]
-
-MANUFACTURERS = [
-    {'name': 'Arista', 'slug': 'arista'}
-]
-
-DEVICE_TYPES = [
-    {
-        'model': 'ceos-switch',
-        'manufacturer': {'name': 'Arista'},
-        'slug': 'ceosswitch',
-        'interface_qty': 24
-    }
-]
-
-DEVICES = {
-    'spines':
-        {
-            'prefix': 'ceos-spine-',
-            'device_role': {'name': 'spine'},
-            'device_type': {'model': 'ceos-switch'},
-            'site': {'name': 'vagrantlab'},
-            'qty': 2
-        },
-    'leafs':
-        {
-            'prefix': 'ceos-leaf-',
-            'device_role': {'name': 'leaf'},
-            'device_type': {'model': 'ceos-switch'},
-            'site': {'name': 'vagrantlab'},
-            'qty': 4
-        }
-}
-
-TRANSIT_PREFIX = {
-    'prefix': '192.168.254.0/24',
-    'site': {'name': 'vagrantlab'}
-}
-
-LOOPBACK_PREFIX = {
-    'prefix': '192.168.255.0/24',
-    'site': {'name': 'vagrantlab'}
-}
-
-RIR = {
-    'name': 'VagrantLabRIR',
-    'slug': 'vagrantlabrir',
-    'is_private': True
-}
-
-ASNS = {
-    'spine': {
-        'asn': 65100
-    },
-    'leaf': {
-        'range_start': 64601
-    }
-}
-
-TAGS = [
-    {
-        'name': 'l3base',
-        'slug': 'l3base',
-        'description': "Signify that an interface is an L3 base interface (i.e., 'no switchport')"
-    }
-]
-
-
-def create_sites(nb):
-    for site in SITES:
+def create_sites(nb, ls_data):
+    for site in ls_data['sites']:
         try:
             print(f"Creating site '{site['name']}'...", end='')
             nb.dcim.sites.create(name=site['name'], slug=site['slug'])
@@ -98,8 +26,8 @@ def create_sites(nb):
             else:
                 raise
 
-def create_roles(nb):
-    for role in ROLES:
+def create_roles(nb, ls_data):
+    for role in ls_data['roles']:
         try:
             print(f"Creating role '{role['name']}'...", end='')
             nb.dcim.device_roles.create(name=role['name'], slug=role['slug'])
@@ -112,8 +40,8 @@ def create_roles(nb):
             else:
                 raise
 
-def create_manufacturers(nb):
-    for manufacturer in MANUFACTURERS:
+def create_manufacturers(nb, ls_data):
+    for manufacturer in ls_data['manufacturers']:
         try:
             print(f"Creating manufacturer '{manufacturer['name']}'...", end='')
             nb.dcim.manufacturers.create(name=manufacturer['name'], slug=manufacturer['slug'])
@@ -126,8 +54,8 @@ def create_manufacturers(nb):
             else:
                 raise
 
-def create_devicetypes(nb):
-    for devicetype in DEVICE_TYPES:
+def create_devicetypes(nb, ls_data):
+    for devicetype in ls_data['device_types']:
         try:
             print(f"Creating device type'{devicetype['model']}'...", end='')
             nb.dcim.device_types.create(model=devicetype['model'],
@@ -142,24 +70,24 @@ def create_devicetypes(nb):
             else:
                 raise
 
-def create_intf_templates(nb):
-    for devicetype in DEVICE_TYPES:
+def create_intf_templates(nb, ls_data):
+    for devicetype in ls_data['device_types']:
         print("Adding interface templates to device type...", end='')
         for i in range(1, devicetype['interface_qty'] + 1):
             try:
-                nb.dcim.interface_templates.create(name=f'Ethernet{i}',
+                nb.dcim.interface_templates.create(name=f"{devicetype['interface_prefix']}{i}",
                                                    device_type={'model': devicetype['model']},
                                                    type='1000base-t')
             except pynetbox.core.query.RequestError as E:
                 if E.error.find("must make a unique set") != -1:
-                    print(f"interface Ethernet{i} already exists, skipping")
+                    print(f"interface {devicetype['interface_prefix']}{i} already exists, skipping")
                     continue
                 else:
                     raise
         print("done")
 
-def create_tags(nb):
-    for tag in TAGS:
+def create_tags(nb, ls_data):
+    for tag in ls_data['tags']:
         print(f"Adding tag {tag['name']}...", end='')
         try:
             nb.extras.tags.create(**tag)
@@ -171,9 +99,9 @@ def create_tags(nb):
             else:
                 raise
 
-def create_devices(nb):
+def create_devices(nb, ls_data):
     created_devices = dict()
-    for role, device in DEVICES.items():
+    for role, device in ls_data['devices'].items():
         created_devices[role] = list()
         for i in range(1, device['qty'] + 1):
             devicename = f"{device['prefix']}{i:02d}"
@@ -203,10 +131,12 @@ def create_connections(nb, ls_devices):
     for spinedev in ls_devices['spines']:
         j = 1
         spinename = spinedev.name
+        spineIntfPrefix = get_intf_prefix(nb, spinedev)
         for leafdev in ls_devices['leafs']:
             leafname = leafdev.name
-            spineintf = f"Ethernet{j}"
-            leafintf = f"Ethernet{i}"
+            leafIntfPrefix = get_intf_prefix(nb, spinedev)
+            spineintf = f"{spineIntfPrefix}{j}"
+            leafintf = f"{leafIntfPrefix}{i}"
             try:
                 print(f"Creating connection between {spinename} {spineintf} "
                       f"and {leafname} {leafintf}...", end='')
@@ -238,26 +168,28 @@ def create_connections(nb, ls_devices):
         i += 1
 
 
-def create_transit_prefix(nb):
-    print(f"Creating transit prefix {TRANSIT_PREFIX['prefix']}...", end='')
-    transit_prefix = nb.ipam.prefixes.get(prefix=TRANSIT_PREFIX['prefix'])
+def create_transit_prefix(nb, ls_data):
+    print(f"Creating transit prefix {ls_data['transit_prefix']['prefix']}...", end='')
+    transit_prefix = nb.ipam.prefixes.get(prefix=ls_data['transit_prefix']['prefix'])
     if transit_prefix:
         print("prefix already exists, skipping")
     else:
-        transit_prefix = nb.ipam.prefixes.create(prefix=TRANSIT_PREFIX['prefix'],
-                                                 site=TRANSIT_PREFIX['site'], status='container')
+        transit_prefix = nb.ipam.prefixes.create(prefix=ls_data['transit_prefix']['prefix'],
+                                                 site=ls_data['transit_prefix']['site'],
+                                                 status='container')
         print("done")
 
     return transit_prefix
 
-def create_loopback_prefix(nb):
-    print(f"Creating loopback prefix {LOOPBACK_PREFIX['prefix']}...", end='')
-    loopback_prefix = nb.ipam.prefixes.get(prefix=LOOPBACK_PREFIX['prefix'])
+def create_loopback_prefix(nb, ls_data):
+    print(f"Creating loopback prefix {ls_data['loopback_prefix']['prefix']}...", end='')
+    loopback_prefix = nb.ipam.prefixes.get(prefix=ls_data['loopback_prefix']['prefix'])
     if loopback_prefix:
         print("prefix already exists, skipping")
     else:
-        loopback_prefix = nb.ipam.prefixes.create(prefix=LOOPBACK_PREFIX['prefix'],
-                                                  site=LOOPBACK_PREFIX['site'], status='container')
+        loopback_prefix = nb.ipam.prefixes.create(prefix=ls_data['loopback_prefix']['prefix'],
+                                                  site=ls_data['loopback_prefix']['site'],
+                                                  status='container')
         loopback_s32 = loopback_prefix.available_prefixes.create({'prefix_length': 32})
         loopback_s32.available_ips.create({'description': 'RESERVED'})
 
@@ -265,34 +197,53 @@ def create_loopback_prefix(nb):
 
     return loopback_prefix
 
-def create_rir_asn(nb, ls_devices):
+def create_rir_asn(nb, ls_data, ls_devices):
     try:
-        print(f"Creating RIR {RIR['name']}...", end='')
-        rir = nb.ipam.rirs.create(**RIR)
+        print(f"Creating RIR {ls_data['rir']['name']}...", end='')
+        rir = nb.ipam.rirs.create(**ls_data['rir'])
         print("done")
 
     except pynetbox.core.query.RequestError as E:
         if E.error.find("name already exists") != -1:
             print("RIR already exists, skipping")
-            rir = nb.ipam.rirs.get(name=RIR['name'])
+            rir = nb.ipam.rirs.get(name=ls_data['rir']['name'])
         else:
             raise
 
     try:
-        print(f"Creating Spine ASN {ASNS['spine']['asn']}...", end='')
-        spine_asn = nb.ipam.asns.create(asn=ASNS['spine']['asn'],
+        print(f"Creating Spine ASN {ls_data['asns']['spine']['asn']}...", end='')
+        spine_asn = nb.ipam.asns.create(asn=ls_data['asns']['spine']['asn'],
                                         rir=rir.id, description='Spine ASN')
         print("done")
 
     except pynetbox.core.query.RequestError as E:
         if E.error.find("ASN already exists") != -1:
             print("ASN already exists, skipping")
-            spine_asn = nb.ipam.asns.get(asn=ASNS['spine']['asn'])
+            spine_asn = nb.ipam.asns.get(asn=ls_data['asns']['spine']['asn'])
         else:
             raise
 
-    leaf_asn = ASNS['leaf']['range_start']
+    leaf_asn = ls_data['asns']['leaf']['range_start']
     leaf_asn_mapping = dict()
+    if ls_data['asns']['leaf'].get('sameasn'):
+        try:
+            print(f"Creating Leaf ASN {leaf_asn}...", end='')
+            nb_leaf_asn = nb.ipam.asns.create(asn=leaf_asn,
+                                              rir=rir.id, description=f'Leaf ASN')
+            print("done")
+
+        except pynetbox.core.query.RequestError as E:
+            if E.error.find("ASN already exists") != -1:
+                print("ASN already exists, skipping")
+                nb_leaf_asn = nb.ipam.asns.get(asn=leaf_asn)
+            else:
+                raise
+        
+        for leaf in ls_devices['leafs']:
+            leaf_asn_mapping[leaf.name] = nb_leaf_asn
+        
+        return spine_asn, leaf_asn_mapping
+
     for leaf in ls_devices['leafs']:
         try:
             print(f"Creating Leaf {leaf.name} ASN {leaf_asn}...", end='')
@@ -314,16 +265,28 @@ def create_rir_asn(nb, ls_devices):
 
     return spine_asn, leaf_asn_mapping
 
+def get_intf_prefix(nb, device):
+    ethernetIntfs = nb.dcim.interfaces.filter(device=device.name, name__ic='Ethernet')
+    intfPrefixMatch = re.match(r'Ethernet(\d+\/|(?=\d+))', list(ethernetIntfs)[0].name)
+    if intfPrefixMatch:
+        intfPrefix = intfPrefixMatch.group(0)
+    else:
+        intfPrefix = None
+
+    return intfPrefix
+
 def create_transit_net_ips_bgp_sessions(
     nb, transit_prefix, ls_devices, spine_asn, leaf_asn_mapping):
     i = 1
     for spinedev in ls_devices['spines']:
         j = 1
         spinename = spinedev.name
+        spineIntfPrefix = get_intf_prefix(nb, spinedev)
         for leafdev in ls_devices['leafs']:
             leafname = leafdev.name
-            spineintfname = f"Ethernet{j}"
-            leafintfname = f"Ethernet{i}"
+            leafIntfPrefix = get_intf_prefix(nb, leafdev)
+            spineintfname = f"{spineIntfPrefix}{j}"
+            leafintfname = f"{leafIntfPrefix}{i}"
 
             spineintf = nb.dcim.interfaces.get(name=spineintfname, device=spinename)
             leafintf = nb.dcim.interfaces.get(name=leafintfname, device=leafname)
@@ -417,24 +380,65 @@ def create_loopbacks_ips(nb, ls_devices, loopback_prefix):
                     'assigned_object_type': 'dcim.interface'})
                 print("done")
             else:
-                print(f"IP already exists, skipping")
+                print("IP already exists, skipping")
 
+def create_vlans_vnis(nb, ls_data):
+    for vlan in ls_data['vlans']:
+        print(f"Creating VLAN {vlan['name']}...", end='')
+        nb_vlan = nb.ipam.vlans.get(name=vlan['name'], vid=vlan['vid'])
+        if nb_vlan:
+            print(f"vlan {vlan['name']} already exists, skipping")
+        else:
+            nb_vlan = nb.ipam.vlans.create(name=vlan['name'], vid=vlan['vid'])
+            print("done")
+
+        if vlan.get('vni'):
+            try:
+                print(f"Creating L2VPN VNI {vlan['vni']}...", end='')
+                nb_l2vpn = nb.ipam.l2vpns.create(
+                    name=vlan['name'], slug=vlan['name'], type='vxlan-evpn', identifier=vlan['vni'])
+                print("done")
+            except pynetbox.core.query.RequestError as E:
+                if E.error.find("already exists") != -1:
+                    nb_l2vpn = nb.ipam.l2vpns.get(name=vlan['name'])
+                    print("L2VPN VNI already exists, skipping")
+                else:
+                    raise
+
+            try:
+                print(f"Creating L2VPN termination between VNI {vlan['vni']}"
+                      f" and VLAN {vlan['vid']}...", end='')
+                nb.ipam.l2vpn_terminations.create(l2vpn=nb_l2vpn.id,
+                                                  assigned_object_type='ipam.vlan',
+                                                  assigned_object_id=nb_vlan.id)
+                print("done")
+            except pynetbox.core.query.RequestError as E:
+                if E.error.find("already exists") != -1:
+                    print("L2VPN termination already exists")
+                else:
+                    raise
 def main():
     nb = pynetbox.api(NB_URL, NB_API_TOKEN)
+    parser = argparse.ArgumentParser(description='Load leaf/spine topology into Netbox')
+    parser.add_argument('lsdata', help="The leaf/spine data file in YAML format")
+    args = parser.parse_args()
+    with open(args.lsdata) as ndf:
+        ls_data = yaml.load(ndf, Loader=yaml.Loader)
 
-    create_sites(nb)
-    create_roles(nb)
-    create_manufacturers(nb)
-    create_devicetypes(nb)
-    create_intf_templates(nb)
-    ls_devices = create_devices(nb)
-    create_tags(nb)
+    create_sites(nb, ls_data)
+    create_roles(nb, ls_data)
+    create_manufacturers(nb, ls_data)
+    create_devicetypes(nb, ls_data)
+    create_intf_templates(nb, ls_data)
+    ls_devices = create_devices(nb, ls_data)
+    create_tags(nb, ls_data)
     create_connections(nb, ls_devices)
-    transit_prefix = create_transit_prefix(nb)
-    loopback_prefix = create_loopback_prefix(nb)
-    spine_asn, leaf_asn_mapping =  create_rir_asn(nb, ls_devices)
+    transit_prefix = create_transit_prefix(nb, ls_data)
+    loopback_prefix = create_loopback_prefix(nb, ls_data)
+    spine_asn, leaf_asn_mapping =  create_rir_asn(nb, ls_data, ls_devices)
     create_transit_net_ips_bgp_sessions(nb, transit_prefix, ls_devices, spine_asn, leaf_asn_mapping)
     create_loopbacks_ips(nb, ls_devices, loopback_prefix)
+    create_vlans_vnis(nb, ls_data)
 
 if __name__ == '__main__':
     main()
