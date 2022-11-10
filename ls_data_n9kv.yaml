@@ -1,0 +1,79 @@
+sites:
+  - name: vagrantlab
+    slug: vagrantlab
+
+roles:
+  - name: leaf
+    slug: leaf
+  - name: spine
+    slug: spine
+
+manufacturers:
+  - name: Cisco
+    slug: cisco
+
+device_types:
+  - model: n9kv-switch
+    manufacturer:
+      name: Cisco
+    interface_qty: 24
+    interface_prefix: Ethernet1/
+    slug: n9kv-switch
+
+devices:
+  spines:
+    device_role:
+      name: spine
+    device_type:
+      model: n9kv-switch
+    prefix: n9kv-spine-
+    qty: 1
+    site:
+      name: vagrantlab
+  leafs:
+    device_role:
+      name: leaf
+    device_type:
+      model: n9kv-switch
+    prefix: n9kv-leaf-
+    qty: 2
+    site:
+      name: vagrantlab
+
+transit_prefix:
+  prefix: 192.168.254.0/24
+  site:
+    name: vagrantlab
+
+loopback_prefix:
+  prefix: 192.168.255.0/24
+  site:
+    name: vagrantlab
+
+rir:
+  is_private: true
+  name: VagrantLabRIR
+  slug: vagrantlabrir
+
+asns:
+  leaf:
+    range_start: 64601
+    sameasn: true
+  spine:
+    asn: 65100
+
+tags:
+  - description: Signify that an interface is an L3 base interface (i.e., 'no switchport')
+    name: l3base
+    slug: l3base
+
+vlans:
+  - name: server-access-01
+    vid: 301
+    vni: 10301
+  - name: dmz-access-01
+    vid: 401
+    vni: 10401
+  - name: svi-vrf-vagrantlab-01
+    vid: 731
+    vni: 20731 

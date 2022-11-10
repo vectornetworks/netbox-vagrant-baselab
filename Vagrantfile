@@ -14,6 +14,7 @@ Vagrant.configure("2") do |config|
     end
 
     config.vm.provision "shell", name: "Installing Netbox", privileged: true, env: {:DJANGO_SUPERUSER_PASSWORD=>'netbox123', :DJANGO_SUPERUSER_USERNAME=>'admin', :DJANGO_SUPERUSER_EMAIL=>'user@host.com'}, inline: <<-SHELL
+      hostname netbox-01
       apt update
       apt install net-tools
       apt install -y postgresql
