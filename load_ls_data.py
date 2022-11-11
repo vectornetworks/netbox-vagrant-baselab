@@ -382,7 +382,22 @@ def create_loopbacks_ips(nb, ls_devices, loopback_prefix):
             else:
                 print("IP already exists, skipping")
 
-def create_vlans_vnis(nb, ls_data):
+def create_vrfs(nb, ls_data):
+    nb_vrfs = dict()
+    for vrf in ls_data['vrfs']:
+        print(f"Creating VRF {vrf['name']}...", end='')
+        nb_vrf = nb.ipam.vrfs.get(name=vrf['name'])
+        if nb_vrf:
+            nb_vrfs[nb_vrf.name] = nb_vrf
+            print(f"VRF {vrf['name']} already exists, skipping")
+        else:
+            nb_vrf = nb.ipam.vrfs.create(name=vrf['name'], enforce_unique=False)
+            nb_vrfs[nb_vrf.name] = nb_vrf
+            print("done")
+    
+    return nb_vrfs
+
+def create_vlans_vnis(nb, ls_data, nb_vrfs, ls_devices):
     for vlan in ls_data['vlans']:
         print(f"Creating VLAN {vlan['name']}...", end='')
         nb_vlan = nb.ipam.vlans.get(name=vlan['name'], vid=vlan['vid'])
@@ -417,6 +432,124 @@ def create_vlans_vnis(nb, ls_data):
                     print("L2VPN termination already exists")
                 else:
                     raise
+
+        svi = vlan.get('svi')
+        if svi:
+            svi_name = f"Vlan{vlan['vid']}"
+            for leaf in ls_devices['leafs']:
+                try:
+                    tags = list()
+                    if svi.get('anycast-gateway'):
+                        tags.append({'name': 'anycast-gateway'})
+                    if svi.get('vrf-svi'):
+                        tags.append({'name': 'vrf-svi'})
+
+                    print(f"Creating interface {svi_name} on {leaf.name}...", end='')
+                    nb_svi = nb.dcim.interfaces.create(name=svi_name,
+                                                       device=leaf.id,
+                                                       type='virtual',
+                                                       tags=tags)
+                    print("done")
+
+                except pynetbox.core.query.RequestError as E:
+                    if E.error.find("must make a unique set") != -1:
+                        print("interface already exists, skipping")
+                        nb_svi = nb.dcim.interfaces.get(name=svi_name, device=leaf.name)
+                    else:
+                        raise
+                
+                if svi.get('ip'):
+                    nb_vrf = nb_vrfs[svi['vrf']]
+                    print(f"Adding IP address {svi['ip']} to interface {svi_name}...", end='')
+                    if nb_svi.count_ipaddresses == 0:
+                        nb.ipam.ip_addresses.create(
+                            assigned_object_id=nb_svi.id,
+                            assigned_object_type='dcim.interface',
+                            address=svi['ip'],
+                            vrf=nb_vrf.id
+                            )
+                        print("done")
+                    else:
+                        print("IP already exists, skipping")
+
+def create_statics(nb, ls_data, nb_vrfs):
+    for cf in ['staticroute', 'nexthop', 'bgp_originate']:
+        if cf == 'nexthop':
+            cftype = 'text'
+        else:
+            cftype = 'boolean'
+        
+        try:
+            print(f"Creating custom prefix field {cf}...", end='')
+            nb.extras.custom_fields.create(content_types=['ipam.prefix'], type=cftype, name=cf)
+            print("done")
+
+        except pynetbox.core.query.RequestError as E:
+            if E.error.find("already exists") != -1:
+                print("field already exists, skipping")
+                continue
+            else:
+                raise
+    
+    for route in ls_data['statics']:
+        print(f"Creating prefix {route['prefix']} as a static route...", end='')
+        static_pfx = nb.ipam.prefixes.get(prefix=route['prefix'])
+        if static_pfx:
+            print("prefix already exists, skipping")
+        else:
+            nb.ipam.prefixes.create(
+                                    prefix=route['prefix'], 
+                                    vrf=nb_vrfs[route['vrf']].id,
+                                    custom_fields={
+                                        'staticroute': True,
+                                        'nexthop': route['nexthop'],
+                                        'bgp_originate': True
+                                    }
+                                   )
+            print("done")
+
+def create_ext_intfs(nb, ls_data, nb_vrfs):
+    for ext_intf in ls_data['ext_interfaces']:
+        nb_device = nb.dcim.devices.get(name=ext_intf['device'])
+        try:
+            print(f"Creating {ext_intf['interface']} on {ext_intf['device']}...", end='')
+            nb_ext_intf = nb.dcim.interfaces.create(
+                name=ext_intf['interface'],
+                device=nb_device.id,
+                type='virtual')
+            print("done")
+
+        except pynetbox.core.query.RequestError as E:
+            if E.error.find("must make a unique set") != -1:
+                print("interface already exists, skipping")
+                nb_ext_intf = nb.dcim.interfaces.get(
+                    name=ext_intf['interface'], 
+                    device=nb_device.name)
+            else:
+                raise
+
+        print(f"Creating IP address for {ext_intf['interface']}...", end='')
+        if nb_ext_intf.count_ipaddresses == 0:
+            nb.ipam.ip_addresses.create(
+                assigned_object_id=nb_ext_intf.id,
+                assigned_object_type='dcim.interface',
+                address=ext_intf['ip'],
+                vrf=nb_vrfs[ext_intf['vrf']].id)
+            print("done")
+        else:
+            print("IP already exists, skipping")
+
+def create_trunk_intfs(nb, ls_data):
+    for trunk_intf in ls_data['trunk_interfaces']:
+        nb_device = nb.dcim.devices.get(name=trunk_intf['device'])
+        nb_intf = nb.dcim.interfaces.get(device=trunk_intf['device'], name=trunk_intf['interface'])
+        print(f"Making interface {trunk_intf['device']} {trunk_intf['interface']} a trunk...", 
+              end='')
+        nb_intf.update(
+            {'mode':'tagged', 
+            'tagged_vlans': [nb.ipam.vlans.get(vid=v) for v in trunk_intf['vlans']]})
+        print("done")
+        
 def main():
     nb = pynetbox.api(NB_URL, NB_API_TOKEN)
     parser = argparse.ArgumentParser(description='Load leaf/spine topology into Netbox')
@@ -438,7 +571,17 @@ def main():
     spine_asn, leaf_asn_mapping =  create_rir_asn(nb, ls_data, ls_devices)
     create_transit_net_ips_bgp_sessions(nb, transit_prefix, ls_devices, spine_asn, leaf_asn_mapping)
     create_loopbacks_ips(nb, ls_devices, loopback_prefix)
-    create_vlans_vnis(nb, ls_data)
+    nb_vrfs = create_vrfs(nb, ls_data)
+    create_vlans_vnis(nb, ls_data, nb_vrfs, ls_devices)
+
+    if ls_data.get('statics'):
+        create_statics(nb, ls_data, nb_vrfs)
+    
+    if ls_data.get('ext_interfaces'):
+        create_ext_intfs(nb, ls_data, nb_vrfs)
+    
+    if ls_data.get('trunk_interfaces'):
+        create_trunk_intfs(nb, ls_data)
 
 if __name__ == '__main__':
     main()

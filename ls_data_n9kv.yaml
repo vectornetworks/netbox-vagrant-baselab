@@ -66,14 +66,57 @@ tags:
   - description: Signify that an interface is an L3 base interface (i.e., 'no switchport')
     name: l3base
     slug: l3base
+  - description: Signify that an interface is an Anycast Gateway
+    name: anycast-gateway
+    slug: anycast-gateway
+  - description: Signify that an interface is the L3 SVI for a VRF
+    name: vrf-svi
+    slug: vrf-svi 
 
 vlans:
   - name: server-access-01
     vid: 301
     vni: 10301
+    svi:
+      ip: 172.30.30.1/24
+      vrf: vrf-vagrantlab-01
+      anycast-gateway: true
   - name: dmz-access-01
     vid: 401
     vni: 10401
+    svi:
+      ip: 172.40.40.1/24
+      vrf: vrf-vagrantlab-01
+      anycast-gateway: true
   - name: svi-vrf-vagrantlab-01
     vid: 731
     vni: 20731 
+    svi:
+      vrf: vrf-vagrantlab-01
+      vrf-svi: true
+
+vrfs:
+  - name: vrf-vagrantlab-01  
+
+statics:
+  - prefix: 10.10.20.0/24
+    nexthop: 192.168.20.2
+    vrf: vrf-vagrantlab-01
+
+ext_interfaces:
+  - device: n9kv-leaf-01
+    interface: Ethernet1/3.20
+    ip: 192.168.20.1/30
+    vrf: vrf-vagrantlab-01
+
+trunk_interfaces:
+  - device: n9kv-leaf-01
+    interface: Ethernet1/2
+    vlans:
+      - 301
+      - 401
+  - device: n9kv-leaf-02
+    interface: Ethernet1/2
+    vlans:
+      - 301
+      - 401
