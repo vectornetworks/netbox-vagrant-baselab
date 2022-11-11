@@ -76,3 +76,6 @@ vlans:
   - name: svi-vrf-vagrantlab-01
     vid: 731
     vni: 20731 
+
+vrfs:
+  - name: vrf-vagrantlab-01  
