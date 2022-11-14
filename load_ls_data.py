@@ -383,6 +383,17 @@ def create_loopbacks_ips(nb, ls_devices, loopback_prefix):
                 print("IP already exists, skipping")
 
 def create_vrfs(nb, ls_data):
+    try:
+        print("Creating custom prefix field l3vni...", end='')
+        nb.extras.custom_fields.create(content_types=['ipam.vrf'], type='integer', name='l3vni')
+        print("done")
+
+    except pynetbox.core.query.RequestError as E:
+        if E.error.find("already exists") != -1:
+            print("field already exists, skipping")
+        else:
+            raise
+
     nb_vrfs = dict()
     for vrf in ls_data['vrfs']:
         print(f"Creating VRF {vrf['name']}...", end='')
@@ -393,6 +404,11 @@ def create_vrfs(nb, ls_data):
         else:
             nb_vrf = nb.ipam.vrfs.create(name=vrf['name'], enforce_unique=False)
             nb_vrfs[nb_vrf.name] = nb_vrf
+            print("done")
+        
+        if vrf.get('vni'):
+            print(f"Adding L3 VNI to {vrf['name']}...", end='')
+            nb_vrf.update({'custom_fields': {'l3vni': vrf['vni']}})
             print("done")
     
     return nb_vrfs
