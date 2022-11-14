@@ -97,6 +97,7 @@ vlans:
 
 vrfs:
   - name: vrf-vagrantlab-01  
+    vni: 20731
 
 statics:
   - prefix: 10.10.20.0/24
