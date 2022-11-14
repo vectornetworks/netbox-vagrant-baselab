@@ -451,6 +451,7 @@ def create_vlans_vnis(nb, ls_data, nb_vrfs, ls_devices):
 
         svi = vlan.get('svi')
         if svi:
+            nb_vrf = nb_vrfs[svi['vrf']]
             svi_name = f"Vlan{vlan['vid']}"
             for leaf in ls_devices['leafs']:
                 try:
@@ -464,6 +465,7 @@ def create_vlans_vnis(nb, ls_data, nb_vrfs, ls_devices):
                     nb_svi = nb.dcim.interfaces.create(name=svi_name,
                                                        device=leaf.id,
                                                        type='virtual',
+                                                       vrf=nb_vrf.id,
                                                        tags=tags)
                     print("done")
 
@@ -475,7 +477,6 @@ def create_vlans_vnis(nb, ls_data, nb_vrfs, ls_devices):
                         raise
                 
                 if svi.get('ip'):
-                    nb_vrf = nb_vrfs[svi['vrf']]
                     print(f"Adding IP address {svi['ip']} to interface {svi_name}...", end='')
                     if nb_svi.count_ipaddresses == 0:
                         nb.ipam.ip_addresses.create(
