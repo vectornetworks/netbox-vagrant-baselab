@@ -414,6 +414,16 @@ def create_vrfs(nb, ls_data):
     return nb_vrfs
 
 def create_vlans_vnis(nb, ls_data, nb_vrfs, ls_devices):
+    try:
+        print("Creating custom field for L3 VNI...", end='')
+        nb.extras.custom_fields.create(content_types=['ipam.l2vpn'], type='boolean', name='vnivrf')
+        print("done")
+    except pynetbox.core.query.RequestError as E:
+        if E.error.find("already exists") != -1:
+            print("field already exists, skipping")
+        else:
+            raise
+
     for vlan in ls_data['vlans']:
         print(f"Creating VLAN {vlan['name']}...", end='')
         nb_vlan = nb.ipam.vlans.get(name=vlan['name'], vid=vlan['vid'])
@@ -423,6 +433,7 @@ def create_vlans_vnis(nb, ls_data, nb_vrfs, ls_devices):
             nb_vlan = nb.ipam.vlans.create(name=vlan['name'], vid=vlan['vid'])
             print("done")
 
+        nb_l2vpn = None
         if vlan.get('vni'):
             try:
                 print(f"Creating L2VPN VNI {vlan['vni']}...", end='')
@@ -460,6 +471,7 @@ def create_vlans_vnis(nb, ls_data, nb_vrfs, ls_devices):
                         tags.append({'name': 'anycast-gateway'})
                     if svi.get('vrf-svi'):
                         tags.append({'name': 'vrf-svi'})
+                        nb_l2vpn.update({'custom_fields': {'vnivrf': True}})
 
                     print(f"Creating interface {svi_name} on {leaf.name}...", end='')
                     nb_svi = nb.dcim.interfaces.create(name=svi_name,
