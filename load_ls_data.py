@@ -545,6 +545,7 @@ def create_ext_intfs(nb, ls_data, nb_vrfs):
             nb_ext_intf = nb.dcim.interfaces.create(
                 name=ext_intf['interface'],
                 device=nb_device.id,
+                vrf=nb_vrfs[ext_intf['vrf']].id,
                 type='virtual')
             print("done")
 
