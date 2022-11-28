@@ -519,8 +519,20 @@ def create_statics(nb, ls_data, nb_vrfs):
                 continue
             else:
                 raise
-    
+    try:
+        print("Creating custom prefix field origindevice...", end='')
+        nb.extras.custom_fields.create(content_types=['ipam.prefix'], 
+            type='object', object_type='dcim.device', name='origindevice')
+        print("done")
+
+    except pynetbox.core.query.RequestError as E:
+        if E.error.find("already exists") != -1:
+            print("field already exists, skipping")
+        else:
+            raise
+
     for route in ls_data['statics']:
+        nb_origindevice = nb.dcim.devices.get(name=route['origindevice'])
         print(f"Creating prefix {route['prefix']} as a static route...", end='')
         static_pfx = nb.ipam.prefixes.get(prefix=route['prefix'])
         if static_pfx:
@@ -532,7 +544,8 @@ def create_statics(nb, ls_data, nb_vrfs):
                                     custom_fields={
                                         'staticroute': True,
                                         'nexthop': route['nexthop'],
-                                        'bgp_originate': True
+                                        'bgp_originate': True,
+                                        'origindevice': nb_origindevice.id
                                     }
                                    )
             print("done")

@@ -103,6 +103,7 @@ statics:
   - prefix: 10.10.20.0/24
     nexthop: 192.168.20.2
     vrf: vrf-vagrantlab-01
+    origindevice: n9kv-leaf-01
 
 ext_interfaces:
   - device: n9kv-leaf-01
