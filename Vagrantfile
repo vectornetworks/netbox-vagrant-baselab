@@ -25,7 +25,8 @@ Vagrant.configure("2") do |config|
       apt install -y python3 python3-pip python3-venv python3-dev build-essential libxml2-dev libxslt1-dev libffi-dev libpq-dev libssl-dev zlib1g-dev
       pip3 install --upgrade pip
       mkdir -p /opt/netbox/ && cd /opt/netbox/
-      git clone -b master --depth 1 https://github.com/netbox-community/netbox.git .
+      git clone -b master https://github.com/netbox-community/netbox.git .
+      git checkout v3.3.10
       adduser --system --group netbox
       chown --recursive netbox /opt/netbox/netbox/media/
       echo "netbox-bgp" > /opt/netbox/local_requirements.txt
