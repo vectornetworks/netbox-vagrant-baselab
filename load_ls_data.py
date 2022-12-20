@@ -355,6 +355,7 @@ def create_transit_net_ips_bgp_sessions(
         i += 1
 
 def create_loopbacks_ips(nb, ls_devices, loopback_prefix):
+    loopback_mapping = dict()
     for ls_device in ls_devices.values():
         for device in ls_device:
             try:
@@ -375,12 +376,17 @@ def create_loopbacks_ips(nb, ls_devices, loopback_prefix):
             print(f"Creating Loopback0 IP address for {device.name}...", end='')
             if loopback_intf.count_ipaddresses == 0:
                 loopback_s32 = loopback_prefix.available_prefixes.create({'prefix_length': 32})
-                loopback_s32.available_ips.create(
+                nb_loopback = loopback_s32.available_ips.create(
                     {'assigned_object_id': loopback_intf.id,
                     'assigned_object_type': 'dcim.interface'})
                 print("done")
+                loopback_mapping[device.name] = nb_loopback
             else:
+                nb_loopback = nb.ipam.ip_addresses.get(interface='Loopback0', device=device.name)
+                loopback_mapping[device.name] = nb_loopback
                 print("IP already exists, skipping")
+    
+    return loopback_mapping
 
 def create_vrfs(nb, ls_data):
     try:
@@ -592,6 +598,59 @@ def create_trunk_intfs(nb, ls_data):
             {'mode':'tagged', 
             'tagged_vlans': [nb.ipam.vlans.get(vid=v) for v in trunk_intf['vlans']]})
         print("done")
+
+def create_bgp_evpn_peerings(nb, ls_devices, spine_asn, leaf_asn_mapping, loopback_mapping):
+    try:
+        print("Creating custom field address family...", end='')
+        nb.extras.custom_fields.create(content_types=['netbox_bgp.bgpsession'], 
+            type='select', name='address_family', choices=['evpn', 'ipv4'])
+        print("done")
+
+    except pynetbox.core.query.RequestError as E:
+        if E.error.find("already exists") != -1:
+            print("field already exists, skipping")
+        else:
+            raise
+
+    for spinedev in ls_devices['spines']:
+        spinename = spinedev.name
+        for leafdev in ls_devices['leafs']:
+            leafname = leafdev.name
+
+            try:
+                print(f"Creating BGP EVPN sessions between {spinename} "
+                      f"and {leafname}...", end='')
+                nb.plugins.bgp.session.create(name=f'{spinename}-->{leafname}(EVPN)',
+                                                site=spinedev.site.id,
+                                                device=spinedev.id,
+                                                local_as=spine_asn.id,
+                                                remote_as=leaf_asn_mapping[leafname].id,
+                                                local_address=loopback_mapping[spinename].id,
+                                                remote_address=loopback_mapping[leafname].id,
+                                                custom_fields = {
+                                                    'address_family': 'evpn'
+                                                }
+                                                )
+                nb.plugins.bgp.session.create(name=f'{leafname}-->{spinename}(EVPN)',
+                                                site=spinedev.site.id,
+                                                device=spinedev.id,
+                                                local_as=leaf_asn_mapping[leafname].id,
+                                                remote_as=spine_asn.id,
+                                                local_address=loopback_mapping[leafname].id,
+                                                remote_address=loopback_mapping[spinename].id,
+                                                custom_fields = {
+                                                    'address_family': 'evpn'
+                                                }
+                                                )
+                print("done")
+
+            except pynetbox.core.query.RequestError as E:
+                if E.error.find("already exists") != -1:
+                    print("BGP session already exists, skipping")
+                    continue
+                else:
+                    raise
+
         
 def main():
     nb = pynetbox.api(NB_URL, NB_API_TOKEN)
@@ -613,7 +672,8 @@ def main():
     loopback_prefix = create_loopback_prefix(nb, ls_data)
     spine_asn, leaf_asn_mapping =  create_rir_asn(nb, ls_data, ls_devices)
     create_transit_net_ips_bgp_sessions(nb, transit_prefix, ls_devices, spine_asn, leaf_asn_mapping)
-    create_loopbacks_ips(nb, ls_devices, loopback_prefix)
+    loopback_mapping = create_loopbacks_ips(nb, ls_devices, loopback_prefix)
+    print(loopback_mapping)
     nb_vrfs = create_vrfs(nb, ls_data)
     create_vlans_vnis(nb, ls_data, nb_vrfs, ls_devices)
 
@@ -625,6 +685,9 @@ def main():
     
     if ls_data.get('trunk_interfaces'):
         create_trunk_intfs(nb, ls_data)
+    
+    if ls_data.get('bgp_evpn_peerings'):
+        create_bgp_evpn_peerings(nb, ls_devices, spine_asn, leaf_asn_mapping, loopback_mapping)
 
 if __name__ == '__main__':
     main()

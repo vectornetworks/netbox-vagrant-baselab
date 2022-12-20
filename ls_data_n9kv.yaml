@@ -122,3 +122,5 @@ trunk_interfaces:
     vlans:
       - 301
       - 401
+
+bgp_evpn_peerings: true
