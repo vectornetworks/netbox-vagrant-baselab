@@ -26,7 +26,7 @@ Vagrant.configure("2") do |config|
       pip3 install --upgrade pip
       mkdir -p /opt/netbox/ && cd /opt/netbox/
       git clone -b master https://github.com/netbox-community/netbox.git .
-      git checkout v3.3.10
+      git checkout v3.4.6
       adduser --system --group netbox
       chown --recursive netbox /opt/netbox/netbox/media/
       echo "netbox-bgp" > /opt/netbox/local_requirements.txt
